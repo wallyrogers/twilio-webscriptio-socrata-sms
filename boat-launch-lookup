@@ -1,0 +1,113 @@
+local twilio = require("twilio")
+
+
+local ACCOUNTSID = '[ACCOUNTSID]'
+local AUTHTOKEN = '[AUTHTOKEN]'
+local PHONENUMBER = '+[TWILIO PHONENUMBER]'
+
+
+local scripturl = 'www.webscript.io/script/oregon-egov/testBoatLaunch'
+
+-- Help for texter
+if request.form.Body=="HELP ME" or request.form.Body =="Help me" then
+  msg = "Type LIST for waterbody list - needed to find your boatlaunch.  To retrieve launch info, type in the waterbody such as Silez River. A list of launch locations  will come back with a number. Type in the waterbody and the facility number. e.g. Silez River 3 is the Hee Hee Illahee launch. Options are LIST, LAUNCH, HELP ME"
+elseif request.form.Body=="LAUNCH" or request.form.Body =="Launch" then
+  msg = "Text me the waterbody, I'll reply with the boat launch"
+elseif request.form.Body=="LIST" or request.form.Body =="List" then
+  msg = "Oregon waterbody list: https://data.oregon.gov/Recreation/List-of-Oregon-Waterbodies/pkp3-5yim?no_mobile=true" 
+else
+-- offsetcount in the event we want to return 5 at a time. 
+-- querylimit could be set to 5, then next query offsetcount = 6, etc.	
+  local offsetcount = 0
+  local querylimit = 1000
+  local querylimit = "&$limit=" .. querylimit .. "&$offset=" .. offsetcount
+-- base is non-variable part of URL
+		base = "https://data.oregon.gov/resource/spxe-q5vj.json?waterbody="
+-- collect the waterbody parameters
+	query = request.form.Body
+			 -- capturing the number if passed
+    	 waterbodynum = string.match (query, "%d+")
+			 -- removing the number from query string 
+	     local numtrimquery = query:gsub('%d+','')
+			 -- removing spaces with right trim	
+    	 rtrimquery = string.match(numtrimquery, ".*%S")
+			 -- preparing json request
+		   local response = http.request {
+       url = base .. rtrimquery  .. querylimit,
+       }
+		-- execute json and parse into lua table
+		local oregonwaterbody = json.parse(response.content)
+		-- count the records for that waterbody
+		local waterbodycount = table.getn(oregonwaterbody)
+		-- giving each facility within the waterbody table a number
+	  -- will be used to reply if the number of the facility
+	  -- was included
+		local keyset={}
+		local n=0
+		for k,v in pairs(oregonwaterbody) do
+			n=n+1
+			keyset[n]=k .. ": " .. v.boating_facility_name
+		end
+    -- 3 functions used to make a table into a string for
+    -- texting a reply
+	  function table.val_to_str ( v )
+			if "string" == type( v ) then
+				v = string.gsub( v, "\n", "\\n" )
+				if string.match( string.gsub(v,"[^'\"]",""), '^"+$' ) then
+					return "'" .. v .. "'"
+				end
+				return '"' .. string.gsub(v,'"', '\\"' ) .. '"'
+			else
+				return "table" == type( v ) and table.tostring( v ) or
+				tostring( v )
+			end
+		end
+		
+		function table.key_to_str ( k )
+			if "string" == type( k ) and string.match( k, "^[_%a][_%a%d]*$" ) then
+				return k
+			else
+				return "[" .. table.val_to_str( k ) .. "]"
+			end
+		end
+
+		function table.tostring( tbl )
+			local result, done = {}, {}
+			for k, v in ipairs( tbl ) do
+				table.insert( result, table.val_to_str( v ) )
+				done[ k ] = true
+			end
+			for k, v in pairs( tbl ) do
+				if not done[ k ] then
+					table.insert( result,
+						table.key_to_str( k ) .. "=" .. table.val_to_str( v ) )
+				end
+			end
+			return table.concat( result, "," ) 
+		end
+	
+		-- converting the number and facility table (keyset) to string
+	  local facility =	table.tostring(keyset)
+		-- replace all quote characters, [%"]+, with a blank space	
+		local facility = facility.gsub(facility,'[%"]+'," ")
+	  -- make sure the number passed is numeric for record search
+		waterbodynum = tonumber(waterbodynum)
+	  -- w equals the exact boat launch description
+		w = oregonwaterbody[waterbodynum]
+			-- if no records at all, provide help 	
+	    if oregonwaterbody == nil then
+         msg = "Sorry, I had a problem finding information about " .. rtrimquery .. ". Options: LIST, LAUNCH, HELP ME"
+      else	
+				-- if facility number is empty, list all boating facilities
+				-- for that waterbody or if wrong provide guidance.
+        if w == nil then
+ 			     msg = "There are " ..waterbodycount .. " launches along " .. rtrimquery .. ". Pick a facility and resumit as " .. rtrimquery .. " #. Example: 'Columbia River 3' yields the Hammond Mooring Basin.   " .. facility .. ". Or text another water body. E.g. type 'Columbia river' for all launchs on that waterbody. Type LIST for all waterbodies."	
+				else
+				-- found the boad launch facility so prepart the google map link
+		    local maplocation =  "https://maps.google.com/maps?q=" .. w.location.latitude  .. "," .. w.location.longitude
+				-- The entire purpose of the SMS was to get this information. 
+			  -- sending the detailed boat lanch information back now.
+			  msg = "The boat launch is " .. w.boating_facility_name .. " in " .. w.county .. " County. Ramp type: " .. w.ramp_type_lanes .. ". Call " .. w.telephone.phone_number .. " for more info. Use fee? " .. w.launch_fee .. ". Map location: " .. maplocation .. "  Text water body. E.g. type 'Columbia river' for all launchs on that waterbody. Type LIST for all waterbodies" 				end
+		  end
+end
+return msg
