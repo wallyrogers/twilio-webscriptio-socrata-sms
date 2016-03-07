@@ -1,4 +1,4 @@
 # twilio-webscriptio-socrata-sms
 Muliti-row SMS with Webscript.io to Mashup Twilio SMS &amp; Data.Oregon.gov json (socrata) &amp; google maps
 
-Based on Justin Grimes but expanded.
+Based on Justin Grimes but expanded. (https://github.com/justgrimes/mini-sms-app-example)
